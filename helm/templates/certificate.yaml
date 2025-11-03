@@ -1,0 +1,19 @@
+{{- if and .Values.gateway.tls.enabled .Values.certManager.enabled }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "discsync-embeddings.name" . }}
+  labels:
+    {{- include "discsync-embeddings.labels" . | nindent 4 }}
+spec:
+  secretName: {{ .Values.gateway.tls.secretName | required "gateway.tls.secretName is required for TLS" }}
+  issuerRef:
+    name: {{ .Values.certManager.issuerRef.name | required "certManager.issuerRef.name is required" }}
+    kind: {{ .Values.certManager.issuerRef.kind | default "ClusterIssuer" }}
+  dnsNames:
+    - {{ .Values.host | required "host is required" | quote }}
+    {{- range $n := .Values.certManager.dnsNames }}
+    - {{ $n | quote }}
+    {{- end }}
+{{- end }}
+

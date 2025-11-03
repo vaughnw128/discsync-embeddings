@@ -1,0 +1,140 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "discsync-embeddings.name" . }}
+  labels:
+    {{- include "discsync-embeddings.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas | default 1 }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit | default 1 }}
+  selector:
+    matchLabels:
+      {{- include "discsync-embeddings.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/name: {{ include "discsync-embeddings.name" . }}
+  template:
+    metadata:
+      labels:
+        {{- include "discsync-embeddings.labels" . | nindent 8 }}
+        app.kubernetes.io/name: {{ include "discsync-embeddings.name" . }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "discsync-embeddings.name" . }}-eks-sa
+      automountServiceAccountToken: true
+      {{- if .Values.db.enabled }}
+      initContainers:
+        - name: app-db-permissions
+          image: ghcr.io/cloudnative-pg/postgresql:16
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DB_SUPERUSER_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (printf "%s-superuser" .Values.db.cluster) .Values.db.superuserSecretName }}
+                  key: username
+            - name: DB_SUPERUSER_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (printf "%s-superuser" .Values.db.cluster) .Values.db.superuserSecretName }}
+                  key: password
+            - name: DB_APP_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (printf "%s-app" .Values.db.cluster) .Values.db.appSecretName }}
+                  key: username
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              RW_HOST="{{ .Values.db.cluster }}-rw.{{ .Release.Namespace }}.svc.cluster.local"
+              DB_NAME="{{ .Values.db.name }}"
+              BASE_URI="postgresql://$DB_SUPERUSER_USER:$DB_SUPERUSER_PASS@$RW_HOST:5432"
+
+              echo "[app-setup] Granting application role privileges on '$DB_NAME'"
+              psql "$BASE_URI/postgres" -v ON_ERROR_STOP=1 -c "GRANT CONNECT, TEMPORARY ON DATABASE \"$DB_NAME\" TO \"$DB_APP_USER\"";
+
+              psql "$BASE_URI/$DB_NAME" -v ON_ERROR_STOP=1 -c "\
+                GRANT USAGE, CREATE ON SCHEMA public TO \"$DB_APP_USER\"; \
+                GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO \"$DB_APP_USER\"; \
+                GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO \"$DB_APP_USER\"; \
+                ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO \"$DB_APP_USER\"; \
+                ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO \"$DB_APP_USER\";\
+              "
+      {{- end }}
+      containers:
+      - name: discsync-embeddings
+        image: {{ .Values.image }}:{{ .Chart.AppVersion }} # This is auto updated by the release mechanism
+        imagePullPolicy: Always
+        resources:
+          {{- toYaml .Values.resources | nindent 12 }}
+        ports:
+        - containerPort: {{ .Values.containerPort | default 8080 }}
+        {{ if or (.Values.secretVars) (.Values.envVars) .Values.db.enabled -}}
+        env:
+        {{- range $secret, $value := .Values.secretVars }}
+        - name: {{ $secret }}
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "discsync-embeddings.name" $ }}
+              key: {{ $secret }}
+        {{- end}}
+        {{- range $var, $value := .Values.envVars }}
+        - name: {{ $var }}
+          value: {{ quote $value }}
+        {{ end -}}
+        {{- if .Values.db.enabled }}
+        - name: DB_NAME
+          value: {{ .Values.db.name | quote }}
+        - name: DB_CLUSTER
+          value: {{ .Values.db.cluster | quote }}
+        - name: DB_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.db.cluster }}-app
+              key: username
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.db.cluster }}-app
+              key: password
+        - name: DATABASE_URL
+          value: "postgresql://$(DB_USERNAME):$(DB_PASSWORD)@$(DB_CLUSTER)-rw.{{ .Release.Namespace }}.svc.cluster.local:5432/$(DB_NAME)"
+        {{- end }}
+        {{- if .Values.ssl.bundle.name }}
+        - name: SSL_CERT_FILE
+          value: "/etc/ssl/custom-ca/bundle.crt"
+        - name: REQUESTS_CA_BUNDLE
+          value: "/etc/ssl/custom-ca/bundle.crt"
+        - name: SSL_CERT_DIR
+          value: "/etc/ssl/custom-ca/bundle.crt"
+        {{- end }}
+        volumeMounts:
+          {{ end -}}
+          {{- if .Values.ssl.bundle.name }}
+          - name: custom-ca-bundle
+            mountPath: /etc/ssl/custom-ca
+            readOnly: true
+          {{- end }}
+          {{- if .Values.volumeMounts -}}
+          {{- range $volume := .Values.volumeMounts }}
+          - mountPath: {{ $volume.mountPath }}
+            name: {{ $volume.name }}
+            readOnly: {{ $volume.readOnly | default "true" }}
+          {{- end }}
+          {{- end }}
+      volumes:
+      {{- if .Values.ssl.bundle.name }}
+        - name: custom-ca-bundle
+          configMap:
+            name: {{ .Values.ssl.bundle.name }}
+            items:
+              - key: {{ .Values.ssl.bundle.key | default "cert-bundle.crt" }}
+                path: bundle.crt
+      {{- end }}
+      {{- range $volume := .Values.volumeMounts }}
+        - name: {{ $volume.name }}
+        {{- toYaml $volume.source | nindent 10}}
+      {{- end }}

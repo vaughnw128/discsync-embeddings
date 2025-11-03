@@ -1,0 +1,37 @@
+image: ghcr.io/vector3cyber/discsync-embeddings
+containerPort: 8080
+
+host: discsync-embeddings.internal.vw-ops.net
+
+gateway:
+  enabled: true
+  className: cilium
+  port: 80
+  tls:
+    enabled: true
+    port: 443
+    secretName: discsync-embeddings-tls
+
+certManager:
+  enabled: true
+  issuerRef:
+    kind: ClusterIssuer
+    name: internal-ca
+  dnsNames:
+    - discsync-embeddings.internal.vw-ops.net
+
+db:
+  enabled: true
+  name: "discsync-embeddings"
+  cluster: "grove-cluster"
+
+  migrator:
+    secretName: "pg-migrator"
+
+resources:
+  requests:
+    memory: 1024Mi
+    cpu: 500m
+  limits:
+    memory: 4096Mi
+    cpu: 4000m

@@ -1,0 +1,92 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "discsync-embeddings.name" . }}-bootstrap-migrator
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "discsync-embeddings.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      restartPolicy: OnFailure
+      initContainers:
+        - name: create-migrator-role
+          image: ghcr.io/cloudnative-pg/postgresql:16
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DB_SUPERUSER_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (printf "%s-superuser" .Values.db.cluster) .Values.db.superuserSecretName }}
+                  key: username
+            - name: DB_SUPERUSER_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (printf "%s-superuser" .Values.db.cluster) .Values.db.superuserSecretName }}
+                  key: password
+            - name: DB_MIGRATOR_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.db.migrator.secretName }}
+                  key: username
+            - name: DB_MIGRATOR_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.db.migrator.secretName }}
+                  key: password
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              RW_HOST="{{ .Values.db.cluster }}-rw.{{ .Release.Namespace }}.svc.cluster.local"
+              DB_NAME="{{ .Values.db.name }}"
+              BASE_URI="postgresql://$DB_SUPERUSER_USER:$DB_SUPERUSER_PASS@$RW_HOST:5432"
+
+              echo "[migrator-setup] Ensuring migrator role exists and has the expected password"
+              if ! psql "$BASE_URI/postgres" -Atqc "SELECT 1 FROM pg_roles WHERE rolname = '$DB_MIGRATOR_USER' LIMIT 1;" | grep -q 1; then
+                psql "$BASE_URI/postgres" -v ON_ERROR_STOP=1 -c "CREATE ROLE \"$DB_MIGRATOR_USER\" LOGIN PASSWORD '$DB_MIGRATOR_PASS'";
+              else
+                psql "$BASE_URI/postgres" -v ON_ERROR_STOP=1 -c "ALTER ROLE \"$DB_MIGRATOR_USER\" WITH LOGIN PASSWORD '$DB_MIGRATOR_PASS'";
+              fi
+
+              echo "[migrator-setup] Granting database-level privileges to migrator on '$DB_NAME'"
+              psql "$BASE_URI/postgres" -v ON_ERROR_STOP=1 -c "GRANT CONNECT, TEMPORARY ON DATABASE \"$DB_NAME\" TO \"$DB_MIGRATOR_USER\"";
+
+              echo "[migrator-setup] Granting schema and default privileges to migrator in database '$DB_NAME'"
+              psql "$BASE_URI/$DB_NAME" -v ON_ERROR_STOP=1 -c "\
+                GRANT USAGE, CREATE ON SCHEMA public TO \"$DB_MIGRATOR_USER\"; \
+                ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO \"$DB_MIGRATOR_USER\"; \
+                ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO \"$DB_MIGRATOR_USER\";\
+              "
+      containers:
+        - name: migrator
+          image: "ghcr.io/vector3cyber/discsync-embeddings:{{ .Chart.AppVersion }}"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DB_MIGRATOR_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.db.migrator.secretName }}
+                  key: username
+            - name: DB_MIGRATOR_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.db.migrator.secretName }}
+                  key: password
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              export DATABASE_URL_MIGRATIONS="postgresql+psycopg://$DB_MIGRATOR_USER:$DB_MIGRATOR_PASS@{{ .Values.db.cluster }}-rw.{{ .Release.Namespace }}.svc.cluster.local:5432/{{ .Values.db.name }}"
+              uv run alembic upgrade head
