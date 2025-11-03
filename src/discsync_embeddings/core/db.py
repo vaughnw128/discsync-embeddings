@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlmodel import SQLModel
 
-# Import models so metadata is populated
+# Import models for metadata
 from discsync_embeddings.core import sqlmodels as _models  # noqa: F401
 
 _engine: Optional[AsyncEngine] = None
@@ -28,6 +28,8 @@ def database_url() -> Optional[str]:
 
 
 def get_engine() -> Optional[AsyncEngine]:
+    """Get or create the async database engine."""
+
     global _engine, _Session
     if _engine is not None:
         return _engine
@@ -36,7 +38,6 @@ def get_engine() -> Optional[AsyncEngine]:
     if url is None:
         return None
 
-    # Always keep SQL echo off; use profiler/loggers if needed
     _engine = create_async_engine(url, echo=False, pool_pre_ping=True)
 
     if url.startswith("sqlite+"):
@@ -55,6 +56,8 @@ def get_engine() -> Optional[AsyncEngine]:
 
 @asynccontextmanager
 async def get_session() -> AsyncIterator[AsyncSession]:
+    """Provide a transactional scope around a series of operations."""
+
     global _Session
     if _Session is None:
         eng = get_engine()
@@ -73,6 +76,8 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 
 
 async def init_dev_sqlite_schema() -> None:
+    """Initialize the database schema for SQLite in dev mode."""
+
     url = database_url()
     if url is None or not url.startswith("sqlite+"):
         return

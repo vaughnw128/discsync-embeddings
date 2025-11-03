@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from discsync_embeddings.helpers.logging import logger
 from discsync_embeddings.core.db import init_dev_sqlite_schema
 from discsync_embeddings.app.routers import build_api_router
-from discsync_embeddings.core.embeddings import worker_loop
+from discsync_embeddings.core.embeddings import worker_loop, Embedder
 
 
 @asynccontextmanager
@@ -23,6 +23,9 @@ async def lifespan(app: FastAPI):
 
     # Initialize SQLite schema in dev mode (no-op for PostgreSQL)
     await init_dev_sqlite_schema()
+
+    # Preload embedder
+    await asyncio.to_thread(Embedder.get)
 
     # Start background embeddings worker
     worker_task = asyncio.create_task(worker_loop())

@@ -20,6 +20,12 @@ certManager:
   dnsNames:
     - discsync-embeddings.internal.vw-ops.net
 
+envVars:
+  EMBEDDING_MODEL: "BAAI/bge-base-en-v1.5"
+  QDRANT_COLLECTION: "discsync-embeddings-bge-base-en-v1_5"\
+
+
+
 db:
   enabled: true
   name: "discsync-embeddings"

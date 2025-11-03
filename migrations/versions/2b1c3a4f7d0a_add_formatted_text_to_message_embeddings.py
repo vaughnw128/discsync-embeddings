@@ -5,6 +5,7 @@ Revises: 5ebd7bdda103
 Create Date: 2025-11-01 11:05:00.000000
 
 """
+
 from __future__ import annotations
 
 from alembic import op
@@ -26,4 +27,3 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_column("message_embeddings", "formatted_text")
-

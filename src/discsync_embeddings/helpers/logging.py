@@ -1,7 +1,9 @@
 # built-in
 import logging
-from uvicorn.logging import DefaultFormatter
 import os
+
+# external
+from uvicorn.logging import DefaultFormatter
 
 logger = logging.getLogger("discsync-embeddings")
 

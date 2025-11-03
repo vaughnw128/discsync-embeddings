@@ -15,9 +15,7 @@ class Guild(SQLModel, table=True):
     name: Optional[str] = Field(default=None)
     owner_id: Optional[int] = Field(default=None, sa_type=BigInteger())
     icon: Optional[str] = Field(default=None)
-    features: Optional[Dict[str, Any]] = Field(
-        default=None, sa_column=Column(JSON())
-    )
+    features: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON()))
     raw_json: Dict[str, Any] = Field(sa_column=Column(JSON()))
 
 
@@ -25,9 +23,7 @@ class Channel(SQLModel, table=True):
     __tablename__ = "channels"
 
     id: int = Field(primary_key=True, sa_type=BigInteger())
-    guild_id: Optional[int] = Field(
-        default=None, index=True, sa_type=BigInteger()
-    )
+    guild_id: Optional[int] = Field(default=None, index=True, sa_type=BigInteger())
     name: Optional[str] = Field(default=None)
     kind: Optional[str] = Field(default=None)
     topic: Optional[str] = Field(default=None)
@@ -53,9 +49,7 @@ class Message(SQLModel, table=True):
     __tablename__ = "messages"
 
     id: int = Field(primary_key=True, sa_type=BigInteger())
-    guild_id: Optional[int] = Field(
-        default=None, index=True, sa_type=BigInteger()
-    )
+    guild_id: Optional[int] = Field(default=None, index=True, sa_type=BigInteger())
     channel_id: int = Field(index=True, sa_type=BigInteger())
     author_id: int = Field(index=True, sa_type=BigInteger())
     created_at_ms: int = Field(index=True, sa_type=BigInteger())
@@ -66,24 +60,12 @@ class Message(SQLModel, table=True):
     kind: Optional[str] = Field(default=None)
     flags: Optional[int] = Field(default=None, sa_type=BigInteger())
 
-    mentions: Optional[Dict[str, Any]] = Field(
-        default=None, sa_column=Column(JSON())
-    )
-    attachments: Optional[Dict[str, Any]] = Field(
-        default=None, sa_column=Column(JSON())
-    )
-    embeds: Optional[Dict[str, Any]] = Field(
-        default=None, sa_column=Column(JSON())
-    )
-    components: Optional[Dict[str, Any]] = Field(
-        default=None, sa_column=Column(JSON())
-    )
-    reactions: Optional[Dict[str, Any]] = Field(
-        default=None, sa_column=Column(JSON())
-    )
-    message_reference: Optional[Dict[str, Any]] = Field(
-        default=None, sa_column=Column(JSON())
-    )
+    mentions: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON()))
+    attachments: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON()))
+    embeds: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON()))
+    components: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON()))
+    reactions: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON()))
+    message_reference: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON()))
     raw_json: Dict[str, Any] = Field(sa_column=Column(JSON()))
 
     __table_args__ = (
@@ -108,9 +90,7 @@ class MessageEmbedding(SQLModel, table=True):
     __tablename__ = "message_embeddings"
 
     # One-to-one with messages.id
-    message_id: int = Field(
-        primary_key=True, foreign_key="messages.id", sa_type=BigInteger()
-    )
+    message_id: int = Field(primary_key=True, foreign_key="messages.id", sa_type=BigInteger())
 
     # Processing metadata
     embedded_at: Optional[datetime] = Field(default=None, index=True)
@@ -124,9 +104,7 @@ class MessageEmbedding(SQLModel, table=True):
     # Destination info
     qdrant_collection: Optional[str] = Field(default=None)
     # Store point ids as JSON array for portability
-    qdrant_point_ids: Optional[List[str]] = Field(
-        default=None, sa_column=Column(JSON())
-    )
+    qdrant_point_ids: Optional[List[str]] = Field(default=None, sa_column=Column(JSON()))
 
     # Status tracking
     status: Optional[str] = Field(default=None, index=True)
