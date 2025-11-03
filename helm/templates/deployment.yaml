@@ -72,7 +72,7 @@ spec:
           {{- toYaml .Values.resources | nindent 12 }}
         ports:
         - containerPort: {{ .Values.containerPort | default 8080 }}
-        {{ if or (.Values.secretVars) (.Values.envVars) .Values.db.enabled -}}
+        {{- if or (or .Values.secretVars .Values.envVars) .Values.db.enabled }}
         env:
         {{- range $secret, $value := .Values.secretVars }}
         - name: {{ $secret }}
@@ -84,7 +84,7 @@ spec:
         {{- range $var, $value := .Values.envVars }}
         - name: {{ $var }}
           value: {{ quote $value }}
-        {{ end -}}
+        {{- end -}}
         {{- if .Values.db.enabled }}
         - name: DB_NAME
           value: {{ .Values.db.name | quote }}
@@ -103,38 +103,19 @@ spec:
         - name: DATABASE_URL
           value: "postgresql://$(DB_USERNAME):$(DB_PASSWORD)@$(DB_CLUSTER)-rw.{{ .Release.Namespace }}.svc.cluster.local:5432/$(DB_NAME)"
         {{- end }}
-        {{- if .Values.ssl.bundle.name }}
-        - name: SSL_CERT_FILE
-          value: "/etc/ssl/custom-ca/bundle.crt"
-        - name: REQUESTS_CA_BUNDLE
-          value: "/etc/ssl/custom-ca/bundle.crt"
-        - name: SSL_CERT_DIR
-          value: "/etc/ssl/custom-ca/bundle.crt"
         {{- end }}
+        {{- if .Values.volumeMounts }}
         volumeMounts:
-          {{ end -}}
-          {{- if .Values.ssl.bundle.name }}
-          - name: custom-ca-bundle
-            mountPath: /etc/ssl/custom-ca
-            readOnly: true
-          {{- end }}
-          {{- if .Values.volumeMounts -}}
           {{- range $volume := .Values.volumeMounts }}
           - mountPath: {{ $volume.mountPath }}
             name: {{ $volume.name }}
-            readOnly: {{ $volume.readOnly | default "true" }}
+            readOnly: {{ $volume.readOnly | default true }}
           {{- end }}
-          {{- end }}
+        {{- end }}
+      {{- if .Values.volumeMounts }}
       volumes:
-      {{- if .Values.ssl.bundle.name }}
-        - name: custom-ca-bundle
-          configMap:
-            name: {{ .Values.ssl.bundle.name }}
-            items:
-              - key: {{ .Values.ssl.bundle.key | default "cert-bundle.crt" }}
-                path: bundle.crt
-      {{- end }}
       {{- range $volume := .Values.volumeMounts }}
         - name: {{ $volume.name }}
-        {{- toYaml $volume.source | nindent 10}}
+          {{- toYaml $volume.source | nindent 10}}
+      {{- end }}
       {{- end }}
