@@ -458,7 +458,7 @@ requires-dist = [
     { name = "sentence-transformers", specifier = ">=2.7.0" },
     { name = "sqlalchemy", specifier = ">=2.0.35" },
     { name = "sqlmodel", specifier = ">=0.0.16" },
-    { name = "torch", index = "https://download.pytorch.org/whl/cu130" },
+    { name = "torch", specifier = ">=2.9.0", index = "https://download.pytorch.org/whl/cu130" },
     { name = "uvicorn", specifier = ">=0.35.0" },
 ]
 

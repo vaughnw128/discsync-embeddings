@@ -9,8 +9,6 @@ COPY pyproject.toml /app/pyproject.toml
 COPY migrations /app/migrations
 COPY alembic.ini /app/alembic.ini
 
-RUN apt-get update && apt-get install -y git
-
 WORKDIR /app
 
 RUN uv sync --frozen --no-cache

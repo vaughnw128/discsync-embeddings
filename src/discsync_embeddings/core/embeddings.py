@@ -211,7 +211,6 @@ class Embedder:
 
         if not messages:
             return 0
-        t0 = time.monotonic()
 
         # Ensure services are initialized
         embed_model, _ = await asyncio.to_thread(cls.get)
@@ -249,20 +248,13 @@ class Embedder:
             fps.append(fp)
         await session.flush()
         if not rows:
-            logger.info(
+            logger.debug(
                 "Batch had no embeddable messages (dedup=%s empty=%s)",
                 dedup_skipped,
                 empty_skipped,
             )
             return 0
 
-        logger.info(
-            "Embedding batch: total=%s prepared=%s dedup=%s empty=%s",
-            len(messages),
-            len(rows),
-            dedup_skipped,
-            empty_skipped,
-        )
         t_embed_start = time.monotonic()
         try:
             vectors = await asyncio.to_thread(embed_model.get_text_embedding_batch, texts)
@@ -299,19 +291,16 @@ class Embedder:
             emb_row.embedded_at = datetime.now(UTC).replace(tzinfo=None)
         await session.flush()
         total = len(rows)
-        total_time = time.monotonic() - t0
-        mps_total = (total / total_time) if total_time > 0 else 0.0
-        mps_embed = (total / t_embed) if t_embed > 0 else 0.0
-        mps_upsert = (total / t_upsert) if t_upsert > 0 else 0.0
+        eff_time = t_embed + t_upsert
+        mps_total = (total / eff_time) if eff_time > 0 else 0.0
+        # Single concise timing log
         logger.info(
-            "Embedded %s msgs in %.2fs (%.2f msg/s) [embed=%.2fs (%.2f msg/s), upsert=%.2fs (%.2f msg/s)]",
+            "timing: count=%d embed=%.3fs upsert=%.3fs total=%.3fs mps=%.2f",
             total,
-            total_time,
-            mps_total,
             t_embed,
-            mps_embed,
             t_upsert,
-            mps_upsert,
+            eff_time,
+            mps_total,
         )
         return total
 
@@ -329,7 +318,7 @@ class Embedder:
         await session.flush()
 
         text, payload = await build_chunk_async(session, m)
-        logger.debug("Message %s text length: %s", m.id, len(text))
+        # Reduced noisy logs; keep length check only
         if not text.strip():
             emb_row.status = "skipped"
             emb_row.error = "empty"
@@ -340,7 +329,6 @@ class Embedder:
 
         # Ensure embedder/index are initialized
         _, index = await asyncio.to_thread(cls.get)
-        logger.info("Start embedding message %s", m.id)
 
         emb_row.formatted_text = text
         pid = _point_id_for_message(m.id)
@@ -376,18 +364,15 @@ async def insert_to_qdrant(index: VectorStoreIndex, doc: Document) -> None:
 
 
 async def process_pending_messages(limit: int = 100) -> int:
-    """Process pending messages for embedding."""
-
     processed = 0
     async with get_session() as session:
         msgs = await _fetch_pending_messages(session, limit)
-        logger.info("Fetched %s pending messages", len(msgs))
-
+        logger.debug("Fetched %s pending messages", len(msgs))
         # Chunk messages for compute-batched embedding
-        batch_size = int(os.environ.get("EMBED_COMPUTE_BATCH", "32"))
+        batch_size = int(os.environ.get("EMBED_COMPUTE_BATCH", "64"))
         for i in range(0, len(msgs), batch_size):
             chunk = msgs[i : i + batch_size]
-            logger.info("Processing chunk %s-%s (size=%s)", i, i + len(chunk) - 1, len(chunk))
+            logger.debug("Processing chunk %s-%s (size=%s)", i, i + len(chunk) - 1, len(chunk))
             try:
                 processed += await Embedder.embed_batch(session, chunk)
             except Exception as exc:  # noqa: BLE001
