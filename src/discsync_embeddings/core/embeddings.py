@@ -3,57 +3,65 @@ import asyncio
 import os
 import time
 from datetime import datetime, UTC
-from typing import List, Optional, Tuple, Any
+from typing import List, Optional, Any
 from threading import Lock
-from uuid import NAMESPACE_URL, uuid5
 
 # external
 from qdrant_client import QdrantClient
-from qdrant_client.http.models import PointStruct
 from sqlalchemy import select, case
 from sqlalchemy.ext.asyncio import AsyncSession
-from llama_index.core import Document, VectorStoreIndex
+from llama_index.core import VectorStoreIndex
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.vector_stores.qdrant import QdrantVectorStore
+from llama_index.core.schema import TextNode, MetadataMode
+import torch
 
 # project
 from discsync_embeddings.core.db import get_session
 from discsync_embeddings.core.sqlmodels import Message, MessageEmbedding
 from discsync_embeddings.core.message import (
-    build_chunk_async,
     message_fingerprint,
+    EmbeddableMessage,
 )
+from discsync_embeddings.core.message import prefetch_names
 from discsync_embeddings.helpers.logging import logger
 
 # Configuration
+
+# Embedding settings
 EMBEDDING_MODEL: str = os.environ.get("EMBEDDING_MODEL", "BAAI/bge-base-en-v1.5")
-QDRANT_COLLECTION: str = os.environ.get("QDRANT_COLLECTION", "discsync-embeddings")
-EMBED_BATCH: int = int(os.environ.get("EMBED_BATCH", "64"))
+EMBED_BATCH: int = int(os.environ.get("EMBED_BATCH", "256"))
 EMBED_INTERVAL_SEC: float = float(os.environ.get("EMBED_INTERVAL_SEC", "5"))
 EMBED_RETRIES: int = int(os.environ.get("EMBED_RETRIES", "3"))
 EMBED_RETRY_BACKOFF: float = float(os.environ.get("EMBED_RETRY_BACKOFF", "1.5"))
-QDRANT_URL: Optional[str] = os.environ.get("QDRANT_URL")
+EMBED_DEVICE: str = os.environ.get("EMBED_DEVICE", "cpu").lower()
+
+# Qdrant settings
+QDRANT_COLLECTION: str = os.environ.get("QDRANT_COLLECTION", "discsync-embeddings")
+QDRANT_HOSTNAME: Optional[str] = os.environ.get("QDRANT_HOSTNAME")
+QDRANT_PORT: Optional[int] = os.environ.get("QDRANT_PORT", 443)
 QDRANT_API_KEY: Optional[str] = os.environ.get("QDRANT_API_KEY")
 QDRANT_TIMEOUT: int = int(os.environ.get("QDRANT_TIMEOUT", "30"))
-EMBED_DEVICE: str = os.environ.get("EMBED_DEVICE", "cpu").lower()
 
 
 def get_qdrant_client() -> QdrantClient:
     """Get a Qdrant client based on environment configuration."""
 
-    url = (QDRANT_URL or "").strip() or None
-    if url is not None:
+    hostname = (QDRANT_HOSTNAME or "").strip() or None
+    if hostname is not None:
+        logger.info(f"Connecting to local Qdrant at {hostname}:{QDRANT_PORT}")
         return QdrantClient(
-            url=url,
-            port=443,
+            url=hostname,
+            port=QDRANT_PORT,
             api_key=QDRANT_API_KEY,
             timeout=QDRANT_TIMEOUT,
         )
+
     # Local/default connection
-    logger.info("Connecting to local Qdrant at %s:%s", "localhost", 443)
+    logger.info(f"Connecting to local Qdrant at localhost:{QDRANT_PORT}")
     return QdrantClient(
         host="localhost",
-        port=443,
+        port=QDRANT_PORT,
         timeout=QDRANT_TIMEOUT,
     )
 
@@ -83,14 +91,7 @@ def _pending_messages_stmt(limit: int):
     )
 
 
-async def _fetch_pending_messages(session: AsyncSession, limit: int) -> List[Message]:
-    """Fetch pending messages for embedding."""
-
-    rs = await session.execute(_pending_messages_stmt(limit))
-    return list(rs.scalars().all())
-
-
-async def _get_or_create_embedding(session: AsyncSession, msg_id: int) -> MessageEmbedding:
+async def update_embed_table(session: AsyncSession, msg_id: int) -> MessageEmbedding:
     """Get or create a MessageEmbedding row for a message ID."""
 
     emb = await session.get(MessageEmbedding, msg_id)
@@ -101,302 +102,198 @@ async def _get_or_create_embedding(session: AsyncSession, msg_id: int) -> Messag
     return emb
 
 
-async def _mark_failed(session: AsyncSession, msg_id: int, error: str) -> None:
-    """Mark a message embedding as failed with an error message."""
-
-    emb = await session.get(MessageEmbedding, msg_id)
-    if emb is None:
-        emb = MessageEmbedding(message_id=msg_id)
-        session.add(emb)
-        await session.flush()
-    emb.status = "failed"
-    emb.error = error[:500]
-    await session.flush()
-
-
-def _resolve_device() -> str:
+def get_embed_device() -> str:
     """Resolve embedding device from EMBED_DEVICE env var.
 
     Supports: 'cpu', 'cuda', 'mps', or 'auto' (prefers CUDA if available).
     Falls back to 'cpu' if torch is unavailable or CUDA is not available.
     """
 
-    dev = EMBED_DEVICE.strip().lower() if EMBED_DEVICE else "cpu"
-    if dev == "auto":
-        try:
-            import torch  # type: ignore
-
+    embed_device = os.environ.get("EMBED_DEVICE", "cpu").strip().lower()
+    match embed_device:
+        case "cuda":
+            return "cuda"
+        case "mps":
+            return "mps"
+        case "auto":
             if getattr(torch, "cuda", None) and torch.cuda.is_available():
                 return "cuda"
             return "cpu"
-        except Exception:
+        case _:
             return "cpu"
-    return dev if dev in {"cpu", "cuda", "mps"} else "cpu"
-
-
-def _point_id_for_message(msg_id: int) -> str:
-    return str(uuid5(NAMESPACE_URL, f"discsync:message:{msg_id}"))
 
 
 class Embedder:
-    _embed: Optional[HuggingFaceEmbedding] = None
-    _index: Optional[VectorStoreIndex] = None
     _lock: Lock = Lock()
-    _device: Optional[str] = None
+    hf_embedding: Optional[HuggingFaceEmbedding] = None
+    vector_index: Optional[VectorStoreIndex] = None
+    store: Optional[QdrantVectorStore] = None
 
-    @classmethod
-    def reset(cls) -> None:
-        """Reset the embedder and index (for testing)."""
+    def __init__(self):
+        """Initialize the embedder."""
 
-        with cls._lock:
-            cls._embed = None
-            cls._index = None
-            cls._device = None
+        # Load model
+        device = get_embed_device()
+        logger.info(f"Loading HF embed model: {EMBEDDING_MODEL} on {device}")
+        self.hf_embedding = HuggingFaceEmbedding(model_name=EMBEDDING_MODEL, device=device, backend="onnx")
 
-    @classmethod
-    def get(cls) -> Tuple[HuggingFaceEmbedding, VectorStoreIndex]:
-        """Get or initialize the embedder and index."""
+        # Load Qdrant store
+        logger.info(f"Initializing Qdrant store: {QDRANT_COLLECTION}")
+        self.store = QdrantVectorStore(
+            client=get_qdrant_client(),
+            collection_name=QDRANT_COLLECTION,
+            batch_size=EMBED_BATCH,
+        )
 
-        if cls._embed is not None and cls._index is not None:
-            return cls._embed, cls._index
-        with cls._lock:
-            if cls._embed is None:
-                t0 = time.monotonic()
-                device = _resolve_device()
-                cls._device = device
-                logger.info("Loading HF embed model: %s on %s", EMBEDDING_MODEL, device)
-                cls._embed = HuggingFaceEmbedding(
-                    model_name=EMBEDDING_MODEL,
-                    device=device,
-                )
-                logger.info("HF model ready in %.2fs", time.monotonic() - t0)
-            if cls._index is None:
-                t1 = time.monotonic()
-                logger.info("Initializing Qdrant store: %s", QDRANT_COLLECTION)
-                store = QdrantVectorStore(
-                    client=get_qdrant_client(),
-                    collection_name=QDRANT_COLLECTION,
-                )
-                logger.info("Qdrant store ready in %.2fs", time.monotonic() - t1)
-                t2 = time.monotonic()
-                logger.info("Building VectorStoreIndex")
-                cls._index = VectorStoreIndex.from_vector_store(
-                    vector_store=store,
-                    embed_model=cls._embed,
-                )
-                logger.info("VectorStoreIndex ready in %.2fs", time.monotonic() - t2)
+        # Initialize index
+        self.index = VectorStoreIndex.from_vector_store(
+            vector_store=self.store,
+            embed_model=self.hf_embedding,
+        )
 
-            # Extra CUDA diagnostics
-            if cls._device == "cuda":
-                try:
-                    import torch  # type: ignore
-
-                    cuda_ver = getattr(torch.version, "cuda", None)
-                    gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else None
-                    logger.info("CUDA runtime=%s gpu=%s", cuda_ver, gpu_name or "unknown")
-                except Exception as exc:  # noqa: BLE001
-                    logger.debug("CUDA diagnostics unavailable: %s", exc)
-            logger.info(
-                "Embedder ready: model=%s device=%s collection=%s",
-                EMBEDDING_MODEL,
-                cls._device,
-                QDRANT_COLLECTION,
-            )
-        assert cls._embed is not None and cls._index is not None
-        return cls._embed, cls._index
-
-    @classmethod
-    async def embed_batch(cls, session: AsyncSession, messages: List[Message]) -> int:
+    async def embed_batch(self, messages: List[Message]) -> int:
         """Embed a batch of messages."""
 
         if not messages:
             return 0
 
-        # Ensure services are initialized
-        embed_model, _ = await asyncio.to_thread(cls.get)
+        time_tokenize_start = time.monotonic()
 
-        # Prepare rows and texts
-        rows: List[MessageEmbedding] = []
-        texts: List[str] = []
-        payloads: List[dict] = []
-        ids: List[str] = []
-        fps: List[str] = []
-        dedup_skipped = 0
-        empty_skipped = 0
+        # Prefetch author/channel names once per batch to speed up formatting
+        author_ids: set[int] = set(m.author_id for m in messages)
+        channel_ids: set[int] = set(m.channel_id for m in messages)
+
+        # Include replied-to author IDs when available
         for m in messages:
-            fp = message_fingerprint(m)
-            existing = await session.get(MessageEmbedding, m.id)
-            if existing is not None and existing.content_sha256 == fp and existing.status == "completed":
-                dedup_skipped += 1
-                continue
-            emb_row = await _get_or_create_embedding(session, m.id)
-            emb_row.status = "tokenizing"
+            ref_author_raw = (m.message_reference or {}).get("author", {}).get("id")
+            try:
+                ref_author_id = int(ref_author_raw) if ref_author_raw is not None else None
+            except (TypeError, ValueError):
+                ref_author_id = None
+            if ref_author_id is not None:
+                author_ids.add(ref_author_id)
+        await prefetch_names(author_ids, channel_ids)
 
-            # Use async builder to resolve names from DB
-            text, payload = await build_chunk_async(session, m)
-            if not text.strip():
-                emb_row.status = "skipped"
-                emb_row.error = "empty"
-                emb_row.content_sha256 = fp
-                emb_row.formatted_text = ""
-                empty_skipped += 1
-                continue
-            rows.append(emb_row)
-            texts.append(text)
-            payloads.append(payload)
-            ids.append(_point_id_for_message(m.id))
-            fps.append(fp)
-        await session.flush()
-        if not rows:
-            logger.debug(
-                "Batch had no embeddable messages (dedup=%s empty=%s)",
-                dedup_skipped,
-                empty_skipped,
+        # Bulk check which message IDs already have embeddings
+        msg_ids = [m.id for m in messages]
+        async with get_session() as session:
+            emb_tbl = MessageEmbedding.__table__
+            existing_ids_result = await session.execute(
+                select(emb_tbl.c.message_id).where(emb_tbl.c.message_id.in_(msg_ids))
             )
+            existing_ids = set(existing_ids_result.scalars().all())
+
+        # Filter messages to embed
+        messages_to_embed = [m for m in messages if m.id not in existing_ids]
+        if not messages_to_embed:
+            logger.debug("All messages in batch already embedded")
             return 0
 
-        t_embed_start = time.monotonic()
-        try:
-            vectors = await asyncio.to_thread(embed_model.get_text_embedding_batch, texts)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Batch embed failed, falling back per-item: %s", exc)
-            vectors = []
-            for t in texts:
-                vec = await asyncio.to_thread(embed_model.get_text_embedding, t)
-                vectors.append(vec)
-        t_embed = time.monotonic() - t_embed_start
+        # Compute fingerprints up-front
+        fps = {m.id: message_fingerprint(m) for m in messages_to_embed}
 
-        # Bulk upsert to Qdrant
-        client = get_qdrant_client()
-        points = [PointStruct(id=pid, vector=vec, payload=payload) for pid, vec, payload in zip(ids, vectors, payloads)]
-        t_upsert_start = time.monotonic()
-        await asyncio.to_thread(
-            client.upsert,
-            collection_name=QDRANT_COLLECTION,
-            points=points,
-        )
-        t_upsert = time.monotonic() - t_upsert_start
+        # Build TextNodes concurrently
+        embeddable_messages = [EmbeddableMessage(m) for m in messages_to_embed]
+        nodes: List[TextNode] = await asyncio.gather(*(em.to_text_node() for em in embeddable_messages))
 
-        # Update rows
-        for emb_row, text, pid, fp in zip(rows, texts, ids, fps):
-            emb_row.formatted_text = text
-            emb_row.qdrant_collection = QDRANT_COLLECTION
-            emb_row.qdrant_point_ids = [pid]
-            emb_row.model_name = EMBEDDING_MODEL
-            emb_row.token_count = len(text.split())
-            emb_row.chunk_count = 1
-            emb_row.status = "completed"
-            emb_row.error = None
-            emb_row.content_sha256 = fp
-            emb_row.embedded_at = datetime.now(UTC).replace(tzinfo=None)
-        await session.flush()
-        total = len(rows)
-        eff_time = t_embed + t_upsert
-        mps_total = (total / eff_time) if eff_time > 0 else 0.0
-        # Single concise timing log
-        logger.info(
-            "timing: count=%d embed=%.3fs upsert=%.3fs total=%.3fs mps=%.2f",
-            total,
-            t_embed,
-            t_upsert,
-            eff_time,
-            mps_total,
-        )
-        return total
+        # Update embed table rows in bulk, single flush
+        async with get_session() as session:
+            emb_tbl = MessageEmbedding.__table__
 
-    @classmethod
-    async def embed_message(cls, session: AsyncSession, m: Message) -> None:
-        """Embed a single message."""
+            # Ensure rows exist for all messages to embed
+            # Fetch any existing rows (should be none, but safe)
+            existing_rows_result = await session.execute(
+                select(MessageEmbedding).where(emb_tbl.c.message_id.in_([m.id for m in messages_to_embed]))
+            )
+            rows_by_id = {r.message_id: r for r in existing_rows_result.scalars().all()}
 
-        fp = message_fingerprint(m)
-        existing = await session.get(MessageEmbedding, m.id)
-        if existing is not None and existing.content_sha256 == fp and existing.status == "completed":
-            return
+            # Create missing rows
+            for m in messages_to_embed:
+                if m.id not in rows_by_id:
+                    row = MessageEmbedding(message_id=m.id, status="pending")
+                    session.add(row)
+                    rows_by_id[m.id] = row
 
-        emb_row = await _get_or_create_embedding(session, m.id)
-        emb_row.status = "tokenizing"
-        await session.flush()
+            # Update rows with tokenize status and formatted text
+            for node in nodes:
+                msg_id = int(node.metadata.get("message_id"))
+                row = rows_by_id[msg_id]
+                row.status = "tokenizing"
+                row.content_sha256 = fps[msg_id]
+                row.formatted_text = node.text
 
-        text, payload = await build_chunk_async(session, m)
-        # Reduced noisy logs; keep length check only
-        if not text.strip():
-            emb_row.status = "skipped"
-            emb_row.error = "empty"
-            emb_row.content_sha256 = fp
-            emb_row.formatted_text = ""
             await session.flush()
-            return
 
-        # Ensure embedder/index are initialized
-        _, index = await asyncio.to_thread(cls.get)
+            time_tokenize_end = time.monotonic() - time_tokenize_start
 
-        emb_row.formatted_text = text
-        pid = _point_id_for_message(m.id)
-        doc = Document(text=text, metadata=payload, doc_id=pid)
-        await insert_to_qdrant(index, doc)
+            # Proceed to embedding
+            time_embed_start = time.monotonic()
+            texts = [n.get_content(metadata_mode=MetadataMode.NONE) for n in nodes]
+            vectors = await asyncio.to_thread(self.hf_embedding.get_text_embedding_batch, texts)
+            for n, v in zip(nodes, vectors):
+                n.embedding = v
+            time_embed_end = time.monotonic() - time_embed_start
 
-        emb_row.qdrant_collection = QDRANT_COLLECTION
-        emb_row.qdrant_point_ids = [pid]
-        emb_row.model_name = EMBEDDING_MODEL
-        emb_row.token_count = len(text.split())
-        emb_row.chunk_count = 1
-        emb_row.status = "completed"
-        emb_row.error = None
-        emb_row.content_sha256 = fp
-        emb_row.embedded_at = datetime.now(UTC).replace(tzinfo=None)
-        await session.flush()
+            # Upsert nodes into Qdrant via the vector store
+            time_upsert_start = time.monotonic()
+            await asyncio.to_thread(self.store.add, nodes)
+            time_upsert_end = time.monotonic() - time_upsert_start
 
+            # Finalize embed rows
+            for node in nodes:
+                msg_id = int(node.metadata.get("message_id"))
+                emb_row = rows_by_id[msg_id]
+                content_only = node.get_content(metadata_mode=MetadataMode.NONE)
+                emb_row.qdrant_collection = QDRANT_COLLECTION
+                emb_row.qdrant_point_ids = [node.id_]
+                emb_row.model_name = EMBEDDING_MODEL
+                emb_row.token_count = len(content_only.split())
+                emb_row.chunk_count = 1
+                emb_row.status = "completed"
+                emb_row.error = None
+                emb_row.embedded_at = datetime.now(UTC).replace(tzinfo=None)
+            await session.flush()
 
-async def insert_to_qdrant(index: VectorStoreIndex, doc: Document) -> None:
-    """Insert a document into Qdrant with retries."""
+        total_time = time_embed_end + time_upsert_end + time_tokenize_end
+        messages_per_second = (len(nodes) / total_time) if total_time > 0 else 0.0
+        logger.info(
+            f"timing: count={len(nodes)} tokenize={time_tokenize_end:.3f}s "
+            f"embed={time_embed_end:.3f}s upsert={time_upsert_end:.3f}s "
+            f"total={total_time:.3f}s mps={messages_per_second:.2f}"
+        )
+        return len(nodes)
 
-    attempts = EMBED_RETRIES
-    delay = EMBED_RETRY_BACKOFF
-    for i in range(attempts):
-        try:
-            await asyncio.to_thread(index.insert, doc)
-            return
-        except Exception as exc:  # noqa: BLE001
-            if i == attempts - 1:
-                raise
-            logger.warning("insert retry %s/%s: %s", i + 1, attempts, exc)
-            await asyncio.sleep(delay * (2**i))
+    async def process_pending_messages(self, limit: int = 100) -> int:
+        processed = 0
+        async with get_session() as session:
+            response = await session.execute(_pending_messages_stmt(limit))
+            messages = list(response.scalars().all())
 
+            logger.debug(f"Fetched {len(messages)} pending messages")
 
-async def process_pending_messages(limit: int = 100) -> int:
-    processed = 0
-    async with get_session() as session:
-        msgs = await _fetch_pending_messages(session, limit)
-        logger.debug("Fetched %s pending messages", len(msgs))
-        # Chunk messages for compute-batched embedding
-        batch_size = int(os.environ.get("EMBED_COMPUTE_BATCH", "64"))
-        for i in range(0, len(msgs), batch_size):
-            chunk = msgs[i : i + batch_size]
-            logger.debug("Processing chunk %s-%s (size=%s)", i, i + len(chunk) - 1, len(chunk))
-            try:
-                processed += await Embedder.embed_batch(session, chunk)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Embed batch failed, trying item-wise: %s", exc)
-                for m in chunk:
-                    try:
-                        await Embedder.embed_message(session, m)
-                        processed += 1
-                    except Exception as exc2:  # noqa: BLE001
-                        logger.warning("Embedding failed for %s: %s", m.id, exc2)
-                        await _mark_failed(session, m.id, str(exc2))
-    return processed
+            # Chunk messages for compute-batched embedding
+            for i in range(0, len(messages), EMBED_BATCH):
+                chunk = messages[i : i + EMBED_BATCH]
+                logger.debug("Processing chunk %s-%s (size=%s)", i, i + len(chunk) - 1, len(chunk))
+                try:
+                    processed += await self.embed_batch(chunk)
+                except Exception as err:  # noqa: BLE001
+                    logger.warning(f"Embed batch failed: {err}")
+        return processed
 
 
 async def worker_loop(interval_sec: float = 5.0) -> None:
     """Background worker loop to process pending messages for embedding."""
 
+    embedder = Embedder()
+
     if interval_sec <= 0:
         interval_sec = EMBED_INTERVAL_SEC
     while True:
         try:
-            n = await process_pending_messages(limit=EMBED_BATCH)
-            if n == 0:
+            num_messages = await embedder.process_pending_messages(limit=EMBED_BATCH)
+            if num_messages == 0:
                 await asyncio.sleep(interval_sec)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Worker error: %s", exc)
+        except Exception as err:  # noqa: BLE001
+            logger.warning(f"Worker error: {err}")
             await asyncio.sleep(interval_sec)
