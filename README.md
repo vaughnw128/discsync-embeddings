@@ -3,6 +3,8 @@
 Discord message embeddings to work with the [discsync](github.com/vaughnw128/discsync) message syncing service. Simplifies message
 objects into single lines, with repeatable and verifiable metadata to ensure correct syncing and idempotency.
 
+![logo](logo.png)
+
 ## Overview
 
 - Single-line formatted_text per message
