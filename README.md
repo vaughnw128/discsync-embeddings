@@ -17,14 +17,14 @@ The service embeds a single, human-readable line per message called
 `formatted_text`. It uses a simplified, consistent structure:
 
 - Prefix: `@<author> in #<channel>:`
-  - Author and channel names are resolved from the database by ID. If a name
-    is unknown, the numeric ID is used (e.g., `@123`, `#123`).
+  - Author and channel names are resolved from the database by ID.
 - Body: normalized message content (single line)
-  - Mentions: `<@123>` → `@user:123` when the body mention cannot be resolved
+  - Mentions: `<@123>` → `@user` 
   - Custom emojis: `<:name:id>` → `[custom:name]`
-  - Role mentions: `<@&456>` → `@role:456`
-  - Channel mentions: `<#789>` → `#channel:789`
-  - Whitespace collapsed to single spaces, CR/LF removed
+  - Role mentions: `<@456>` → `@role`
+  - Channel mentions: `<#789>` → `#channel`
+  - Whitespace collapsed to single spaces, CR/LF removed, non unicode characters removed
+  - Emojis transformed into shortcodes, e.g. 😊 → `:smile:`
 - Optional markers appended as space-separated tokens:
   - `[replying to @<parent-author>]` when a reply reference is present
   - `[has reactions]` when reactions exist
@@ -33,7 +33,7 @@ The service embeds a single, human-readable line per message called
 ### Examples
 - Basic with mention
   - Input content: `hey <@123> welcome!`
-  - Output: `@alice in #general: hey @user:123 welcome!`
+  - Output: `@alice in #general: hey @user welcome!`
 
 - With reply and reactions
   - Output: `@alice in #general: thanks! [replying to @bob] [has reactions]`

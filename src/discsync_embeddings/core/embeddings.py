@@ -23,7 +23,6 @@ from discsync_embeddings.core.message import (
     message_fingerprint,
     EmbeddableMessage,
 )
-from discsync_embeddings.core.message import prefetch_names
 from discsync_embeddings.helpers.logging import logger
 
 # Configuration
@@ -137,8 +136,7 @@ class Embedder:
         logger.info(f"Loading HF embed model: {EMBEDDING_MODEL} on {device}")
         self.hf_embedding = HuggingFaceEmbedding(model_name=EMBEDDING_MODEL, device=device, backend="onnx")
 
-        # Load Qdrant store
-        logger.info(f"Initializing Qdrant store: {QDRANT_COLLECTION}")
+        # Load Qdrant store after ensuring collection schema.
         self.store = QdrantVectorStore(
             client=get_qdrant_client(),
             collection_name=QDRANT_COLLECTION,
@@ -158,21 +156,6 @@ class Embedder:
             return 0
 
         time_tokenize_start = time.monotonic()
-
-        # Prefetch author/channel names once per batch to speed up formatting
-        author_ids: set[int] = set(m.author_id for m in messages)
-        channel_ids: set[int] = set(m.channel_id for m in messages)
-
-        # Include replied-to author IDs when available
-        for m in messages:
-            ref_author_raw = (m.message_reference or {}).get("author", {}).get("id")
-            try:
-                ref_author_id = int(ref_author_raw) if ref_author_raw is not None else None
-            except (TypeError, ValueError):
-                ref_author_id = None
-            if ref_author_id is not None:
-                author_ids.add(ref_author_id)
-        await prefetch_names(author_ids, channel_ids)
 
         # Bulk check which message IDs already have embeddings
         msg_ids = [m.id for m in messages]
@@ -274,7 +257,12 @@ class Embedder:
             # Chunk messages for compute-batched embedding
             for i in range(0, len(messages), EMBED_BATCH):
                 chunk = messages[i : i + EMBED_BATCH]
-                logger.debug("Processing chunk %s-%s (size=%s)", i, i + len(chunk) - 1, len(chunk))
+                logger.debug(
+                    "Processing chunk %s-%s (size=%s)",
+                    i,
+                    i + len(chunk) - 1,
+                    len(chunk),
+                )
                 try:
                     processed += await self.embed_batch(chunk)
                 except Exception as err:  # noqa: BLE001

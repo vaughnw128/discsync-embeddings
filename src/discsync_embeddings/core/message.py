@@ -1,39 +1,55 @@
 # built-in
+import asyncio
 import hashlib
 import json
 import re
+from re import Match, Pattern
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Dict, List, Optional, cast, Callable, Coroutine
 from collections.abc import Buffer
 from uuid import uuid5, NAMESPACE_URL
 
+# external
+import emoji
 from llama_index.core.schema import TextNode
 
-from discsync_embeddings.core.db import get_session
-
 # project
+from discsync_embeddings.core.db import get_session
 from discsync_embeddings.core.sqlmodels import Message, User, Channel
-from sqlalchemy import select
 
-# In-memory caches for names
-_author_name_cache: Dict[int, str] = {}
-_channel_name_cache: Dict[int, str] = {}
+_author_name_cache: Dict[int, tuple[str, float]] = {}
+_channel_name_cache: Dict[int, tuple[str, float]] = {}
 
 # Normalization patterns
 _RE_EMOJI_CUSTOM = re.compile(r"<a?:([A-Za-z0-9_~]+):\d+>")
-_RE_MENTION_USER = re.compile(r"<@!?(\d+)>")
-_RE_MENTION_ROLE = re.compile(r"<@&(\d+)>")
-_RE_MENTION_CHANNEL = re.compile(r"<#(\d+)>")
+_RE_MENTION_USER = re.compile(r"<@!?((?:\d+))>")
+_RE_MENTION_ROLE = re.compile(r"<@&((?:\d+))>")
+_RE_MENTION_CHANNEL = re.compile(r"<#((?:\d+))>")
 
 
-def _normalize_once(text: str) -> str:
-    """Apply Discord-specific normalization passes without trimming length."""
+async def _async_re_sub(
+    pattern: Pattern[str],
+    repl_coro: Callable[[Match[str]], Coroutine[Any, Any, str]],
+    text: str,
+) -> str:
+    """Asynchronous version of re.sub where the replacement function is a coroutine."""
+    matches: List[Match[str]] = list(pattern.finditer(text))
+    if not matches:
+        return text
 
-    text = _RE_EMOJI_CUSTOM.sub(r"[custom:\1]", text)
-    text = _RE_MENTION_USER.sub(r"@user:\1", text)
-    text = _RE_MENTION_ROLE.sub(r"@role:\1", text)
-    text = _RE_MENTION_CHANNEL.sub(r"#channel:\1", text)
-    return text
+    # Start all replacement coroutines concurrently.
+    replacements = await asyncio.gather(*(repl_coro(m) for m in matches))
+
+    parts: List[str] = []
+    last_end = 0
+    for match, replacement in zip(matches, replacements):
+        start, end = match.span()
+        parts.append(text[last_end:start])
+        parts.append(replacement)
+        last_end = end
+    parts.append(text[last_end:])
+
+    return "".join(parts)
 
 
 def _collapse_whitespace(text: str) -> str:
@@ -42,44 +58,51 @@ def _collapse_whitespace(text: str) -> str:
     return " ".join(text.replace("\r", " ").replace("\n", " ").split())
 
 
-def normalize_text(text: Optional[str], *, limit: int | None = None) -> str:
-    """Normalize Discord markup and collapse whitespace; optional truncation."""
+def _replace_emojis(text: Optional[str]) -> str:
+    """Replace emojis in text.
 
-    if text is None:
-        return ""
-    out = _collapse_whitespace(_normalize_once(text))
-    if isinstance(limit, int) and limit > 0:
-        return out[:limit]
+    - Custom Discord emojis like `<:name:id>` or `<a:name:id>` become
+      `[emoji:name]`.
+    - Runs of Unicode emoji collapse to a single `[emoji]` token.
+    """
+
+    out = _RE_EMOJI_CUSTOM.sub(r"[emoji:\1]", text)
+    out = emoji.demojize(out)
     return out
 
 
-def _pick_user_display_name(user: Optional[User], fallback: str) -> str:
-    """Get the display name for a user, falling back to the user ID."""
+async def _replace_mentions(text: Optional[str]) -> str:
+    """Replace mentions in text.
 
-    if user is None:
-        return fallback
-    if getattr(user, "global_name", None):
-        return str(user.global_name)
-    if getattr(user, "username", None):
-        return str(user.username)
-    return fallback
+    - User mentions like `<@id>` become `@username`.
+    - Channel mentions like `<#id>` become `#channelname`.
+    - Role mentions like `<@&id>` are changed to @role.
+    """
 
+    async def _replace_user_mention(match: re.Match[str]) -> str:
+        user_id_raw = match.group(1)
+        try:
+            user_id = int(user_id_raw)
+        except (TypeError, ValueError):
+            return match.group(0)
 
-async def prefetch_names(author_ids: set[int], channel_ids: set[int]) -> None:
-    """Warm author and channel name caches for the provided IDs in bulk."""
+        author_name = await get_author_name(user_id)
+        return f"@{author_name}"
 
-    if not author_ids and not channel_ids:
-        return
+    async def _replace_channel_mention(match: re.Match[str]) -> str:
+        channel_id_raw = match.group(1)
+        try:
+            channel_id = int(channel_id_raw)
+        except (TypeError, ValueError):
+            return match.group(0)
 
-    async with get_session() as session:
-        if author_ids:
-            result = await session.execute(select(User).where(User.id.in_(list(author_ids))))
-            for user in result.scalars():
-                _author_name_cache[user.id] = _pick_user_display_name(user, str(user.id))
-        if channel_ids:
-            result = await session.execute(select(Channel).where(Channel.id.in_(list(channel_ids))))
-            for channel in result.scalars():
-                _channel_name_cache[channel.id] = channel.name if getattr(channel, "name", None) else str(channel.id)
+        channel_name = await get_channel_name(channel_id)
+        return f"#{channel_name}"
+
+    out = await _async_re_sub(_RE_MENTION_USER, _replace_user_mention, text)
+    out = await _async_re_sub(_RE_MENTION_CHANNEL, _replace_channel_mention, out)
+    out = _RE_MENTION_ROLE.sub("@role", out)
+    return out
 
 
 async def get_author_name(author_id: int) -> str:
@@ -90,7 +113,10 @@ async def get_author_name(author_id: int) -> str:
         return cached
     async with get_session() as session:
         user = await session.get(User, author_id)
-    username = _pick_user_display_name(user, str(author_id))
+    try:
+        username = user.global_name
+    except Exception:
+        username = "bot"
     _author_name_cache[author_id] = username
     return username
 
@@ -101,6 +127,7 @@ async def get_channel_name(channel_id: int) -> str:
     cached = _channel_name_cache.get(channel_id)
     if cached is not None:
         return cached
+
     async with get_session() as session:
         channel = await session.get(Channel, channel_id)
     channel_name = channel.name if channel and getattr(channel, "name", None) else str(channel_id)
@@ -130,6 +157,19 @@ def message_fingerprint(m: Message) -> str:
     return hashlib.sha256(buf).hexdigest()
 
 
+async def clean_message(content: Optional[str]) -> str:
+    """Clean message content for embedding."""
+
+    if content is None:
+        return ""
+
+    text = _collapse_whitespace(content)
+    text = _replace_emojis(text)
+    text = text.encode("ascii", errors="ignore").decode()  # remove non printable characters
+    text = await _replace_mentions(text)
+    return text
+
+
 @dataclass(slots=True)
 class EmbeddableMessage:
     """Build an embeddable message from a Message object."""
@@ -142,9 +182,10 @@ class EmbeddableMessage:
         m = self.message
         channel_name = await get_channel_name(self.message.channel_id)
         author_name = await get_author_name(self.message.author_id)
+        content = await clean_message(m.content)
         parts: List[str] = [
             f"@{author_name} in #{channel_name}:",
-            normalize_text(m.content, limit=4000),
+            content,
         ]
 
         if m.reactions:
