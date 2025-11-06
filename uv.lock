@@ -313,7 +313,7 @@ wheels = [
 
 [[package]]
 name = "discsync-embeddings"
-version = "1.0.19"
+version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
