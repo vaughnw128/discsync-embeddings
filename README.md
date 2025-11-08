@@ -1,6 +1,6 @@
 # Discsync Embeddings
 
-Discord message embeddings to work with the [discsync](github.com/vaughnw128/discsync) message syncing service. Simplifies message
+Discord message embeddings to work with the [discsync](https://github.com/vaughnw128/discsync) message syncing service. Simplifies message
 objects into single lines, with repeatable and verifiable metadata to ensure correct syncing and idempotency.
 
 ![logo](logo.png)
@@ -69,3 +69,4 @@ uv run uvicorn discsync_embeddings.main:app --host 0.0.0.0 --port 8080 --reload
 export DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/dbname
 uv run uvicorn discsync_embeddings.main:app --host 0.0.0.0 --port 8080
 ```
+
