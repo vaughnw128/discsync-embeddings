@@ -23,6 +23,11 @@ dependencies = [
     "optimum[onnxruntime]>=2.0.0",
     "huggingface-hub[hf-xet]>=0.36.0",
     "emoji>=2.15.0",
+    "langchain-openai>=1.0.2",
+    "langchain-qdrant>=1.1.0",
+    "protobuf>=4.25.0,<6",
+    "grpcio>=1.60.0",
+    "googleapis-common-protos>=1.63.0",
 ]
 
 [[tool.uv.index]]

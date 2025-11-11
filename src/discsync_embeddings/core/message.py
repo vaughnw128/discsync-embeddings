@@ -11,20 +11,19 @@ from uuid import uuid5, NAMESPACE_URL
 
 # external
 import emoji
-from llama_index.core.schema import TextNode
 
 # project
 from discsync_embeddings.core.db import get_session
 from discsync_embeddings.core.sqlmodels import Message, User, Channel
 
-_author_name_cache: Dict[int, tuple[str, float]] = {}
-_channel_name_cache: Dict[int, tuple[str, float]] = {}
+_author_name_cache: Dict[int, str] = {}
+_channel_name_cache: Dict[int, str] = {}
 
 # Normalization patterns
 _RE_EMOJI_CUSTOM = re.compile(r"<a?:([A-Za-z0-9_~]+):\d+>")
-_RE_MENTION_USER = re.compile(r"<@!?((?:\d+))>")
-_RE_MENTION_ROLE = re.compile(r"<@&((?:\d+))>")
-_RE_MENTION_CHANNEL = re.compile(r"<#((?:\d+))>")
+_RE_MENTION_USER = re.compile(r"<@!?(\d+)>")
+_RE_MENTION_ROLE = re.compile(r"<@&(\d+)>")
+_RE_MENTION_CHANNEL = re.compile(r"<#(\d+)>")
 
 
 async def _async_re_sub(
@@ -58,7 +57,7 @@ def _collapse_whitespace(text: str) -> str:
     return " ".join(text.replace("\r", " ").replace("\n", " ").split())
 
 
-def _replace_emojis(text: Optional[str]) -> str:
+def _replace_emojis(text: str) -> str:
     """Replace emojis in text.
 
     - Custom Discord emojis like `<:name:id>` or `<a:name:id>` become
@@ -71,7 +70,7 @@ def _replace_emojis(text: Optional[str]) -> str:
     return out
 
 
-async def _replace_mentions(text: Optional[str]) -> str:
+async def _replace_mentions(text: str) -> str:
     """Replace mentions in text.
 
     - User mentions like `<@id>` become `@username`.
@@ -115,7 +114,7 @@ async def get_author_name(author_id: int) -> str:
         user = await session.get(User, author_id)
     try:
         username = user.global_name
-    except Exception:
+    except Exception:  # noqa: BLE001
         username = "bot"
     _author_name_cache[author_id] = username
     return username
@@ -175,6 +174,9 @@ class EmbeddableMessage:
     """Build an embeddable message from a Message object."""
 
     message: Message
+    cleaned_text: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+    pid: Optional[str] = None
 
     async def build_text(self) -> str:
         """Build message text"""
@@ -224,10 +226,9 @@ class EmbeddableMessage:
 
         return metadata
 
-    async def to_text_node(self) -> TextNode:
-        """Convert to a TextNode for embedding."""
+    async def build(self) -> "EmbeddableMessage":
+        self.cleaned_text = await self.build_text()
+        self.metadata = await self.get_metadata()
+        self.pid = get_point_id(self.message.id)
 
-        text = await self.build_text()
-        metadata = await self.get_metadata()
-        pid = get_point_id(self.message.id)
-        return TextNode(text=text, metadata=metadata, id_=pid)
+        return self

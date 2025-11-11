@@ -95,7 +95,6 @@ class MessageEmbedding(SQLModel, table=True):
     # Processing metadata
     embedded_at: Optional[datetime] = Field(default=None, index=True)
     model_name: Optional[str] = Field(default=None)
-    token_count: Optional[int] = Field(default=None)
     chunk_count: Optional[int] = Field(default=None)
 
     # Store formatted chunk text used for embedding
