@@ -4,14 +4,12 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator, Optional
 
 # external
-from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-from sqlmodel import SQLModel
 
 # Import models for metadata
 from discsync_embeddings.core import sqlmodels as _models  # noqa: F401
@@ -20,11 +18,23 @@ _engine: Optional[AsyncEngine] = None
 _Session: Optional[async_sessionmaker[AsyncSession]] = None
 
 
-def database_url() -> Optional[str]:
-    if (os.environ.get("DEV_MODE") or "").strip().lower() == "true":
-        return "sqlite+aiosqlite:///./dev.db"
+def _normalize_async_url(url: str) -> str:
+    """Ensure a PostgreSQL URL uses the asyncpg dialect.
 
-    return os.environ.get("DATABASE_URL", None)
+    CNPG secrets provide ``postgresql://...`` but SQLAlchemy's async engine
+    requires ``postgresql+asyncpg://...``.
+    """
+
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    return url
+
+
+def database_url() -> Optional[str]:
+    url = os.environ.get("DATABASE_URL", None)
+    if url is not None:
+        url = _normalize_async_url(url)
+    return url
 
 
 def get_engine() -> Optional[AsyncEngine]:
@@ -39,17 +49,6 @@ def get_engine() -> Optional[AsyncEngine]:
         return None
 
     _engine = create_async_engine(url, echo=False, pool_pre_ping=True)
-
-    if url.startswith("sqlite+"):
-
-        @event.listens_for(_engine.sync_engine, "connect")
-        def _set_sqlite_pragma(dbapi_conn, _):  # type: ignore[no-redef]
-            cursor = dbapi_conn.cursor()
-            try:
-                cursor.execute("PRAGMA foreign_keys=ON")
-            finally:
-                cursor.close()
-
     _Session = async_sessionmaker(_engine, expire_on_commit=False)
     return _engine
 
@@ -73,16 +72,3 @@ async def get_session() -> AsyncIterator[AsyncSession]:
         raise
     finally:
         await session.close()
-
-
-async def init_dev_sqlite_schema() -> None:
-    """Initialize the database schema for SQLite in dev mode."""
-
-    url = database_url()
-    if url is None or not url.startswith("sqlite+"):
-        return
-    eng = get_engine()
-    if eng is None:
-        return
-    async with eng.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)

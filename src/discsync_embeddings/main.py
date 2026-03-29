@@ -10,7 +10,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 # project
 from discsync_embeddings.helpers.logging import logger
-from discsync_embeddings.core.db import init_dev_sqlite_schema
 from discsync_embeddings.app.routers import build_api_router
 from discsync_embeddings.core.embeddings import worker_loop
 
@@ -18,8 +17,6 @@ from discsync_embeddings.core.embeddings import worker_loop
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting discsync-embeddings")
-
-    await init_dev_sqlite_schema()
 
     worker_task = asyncio.create_task(worker_loop())
 

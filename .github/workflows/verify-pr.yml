@@ -1,0 +1,11 @@
+name: Verify PR
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  verify:
+    uses: vaughnw128/hakoniwa/.github/workflows/verify-pr.yml@main

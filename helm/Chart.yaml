@@ -4,3 +4,8 @@ description: discsync-embeddings
 type: application
 version: 1.1.2
 appVersion: 1.1.2
+
+dependencies:
+  - name: single-container
+    version: "1.x.x"
+    repository: "oci://ghcr.io/vaughnw128/charts"
