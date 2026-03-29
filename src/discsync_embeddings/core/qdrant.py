@@ -6,18 +6,21 @@ import asyncio
 # external
 from langchain_openai import OpenAIEmbeddings
 from langchain_qdrant import QdrantVectorStore
+from pydantic import SecretStr
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import Distance, VectorParams
 
-from discsync_embeddings.core.message import EmbeddableMessage
-
 # project
+from discsync_embeddings.core.message import EmbeddableMessage
 from discsync_embeddings.helpers.logging import logger
 
-# Embedding settings
+# embedder
 EMBEDDING_MODEL: str = os.environ.get("EMBEDDING_MODEL", "text-embedding-qwen3-embedding-0.6b")
+EMBEDDING_BASE_URL: str = os.environ.get("EMBEDDING_BASE_URL", "http://localhost:1234/v1")
+EMBEDDING_DIMENSIONS: int = int(os.environ.get("EMBEDDING_DIMENSIONS", "1024"))
+EMBEDDING_API_KEY: str = os.environ.get("EMBEDDING_API_KEY", "n/a")
 
-# Qdrant settings
+# qdrant
 QDRANT_COLLECTION: str = os.environ.get("QDRANT_COLLECTION", "discsync-embeddings")
 QDRANT_HOSTNAME: Optional[str] = os.environ.get("QDRANT_HOSTNAME")
 QDRANT_PORT: int = int(os.environ.get("QDRANT_PORT", "443"))
@@ -39,7 +42,7 @@ def get_qdrant_client() -> QdrantClient:
             prefer_grpc=False,
         )
 
-    # Local/default connection
+    # local
     logger.info(f"Connecting to local Qdrant at localhost:{QDRANT_PORT}")
     return QdrantClient(
         host="localhost",
@@ -57,15 +60,21 @@ class QdrantService:
     collection: str = QDRANT_COLLECTION
 
     async def setup(self) -> "QdrantService":
-        logger.info("Setting up QdrantService...")
+        logger.info(
+            f"Setting up QdrantService: "
+            f"embedding_url={EMBEDDING_BASE_URL} model={EMBEDDING_MODEL} "
+            f"qdrant={QDRANT_HOSTNAME or 'localhost'}:{QDRANT_PORT} "
+            f"collection={QDRANT_COLLECTION}"
+        )
 
         self.embeddings = OpenAIEmbeddings(
-            base_url="http://localhost:1234/v1",
-            dimensions=1024,
+            base_url=EMBEDDING_BASE_URL,
+            dimensions=EMBEDDING_DIMENSIONS,
             model=EMBEDDING_MODEL,
-            api_key="n/a",
-            timeout=60,
+            api_key=SecretStr(EMBEDDING_API_KEY),
+            timeout=300,
             check_embedding_ctx_length=False,
+            chunk_size=20,
         )
 
         client = get_qdrant_client()
@@ -74,10 +83,11 @@ class QdrantService:
         try:
             client.create_collection(
                 collection_name=QDRANT_COLLECTION,
-                vectors_config=VectorParams(size=1024, distance=Distance.COSINE),
+                vectors_config=VectorParams(size=EMBEDDING_DIMENSIONS, distance=Distance.COSINE),
             )
-        except Exception:  # noqa: BLE001
-            pass  # Already exists
+            logger.info(f"Created collection '{QDRANT_COLLECTION}'")
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"Collection create skipped: {e}")
 
         self.vector_store = QdrantVectorStore(
             client=client,
@@ -91,12 +101,7 @@ class QdrantService:
         return self
 
     async def embed_messages(self, messages: List[EmbeddableMessage]) -> List[str]:
-        """Embed and store messages in Qdrant.
-
-        Uses add_texts with explicit string coercion to avoid accidental None
-        values or non-string types triggering 400 errors from the embedding
-        backend (expects string or array of strings in 'input').
-        """
+        """Embed and store messages in Qdrant."""
 
         texts: List[str] = []
         metadatas: List[dict] = []
@@ -108,19 +113,17 @@ class QdrantService:
             metadatas.append(message.metadata or {})
             ids.append(message.pid or "")
 
-        if texts:
-            sample_count = min(3, len(texts))
-            logger.debug(
-                "Embedding batch sample types: "
-                + ", ".join(f"{type(t).__name__}:{repr(t)[:40]}" for t in texts[:sample_count])
+        logger.debug(f"Embedding {len(texts)} texts via add_texts...")
+        try:
+            await asyncio.to_thread(
+                self.vector_store.add_texts,
+                texts,
+                metadatas=metadatas,
+                ids=ids,
             )
-
-        await asyncio.to_thread(
-            self.vector_store.add_texts,
-            texts,
-            metadatas=metadatas,
-            ids=ids,
-        )
+        except Exception as e:
+            logger.error(f"add_texts failed: {type(e).__name__}: {e}")
+            raise
         return ids
 
 

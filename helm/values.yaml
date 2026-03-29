@@ -16,17 +16,22 @@ certManager:
   enabled: true
   issuerRef:
     kind: ClusterIssuer
-    name: internal-ca
+    name: cloudflare-issuer
   dnsNames:
     - discsync-embeddings.internal.vw-ops.net
 
 envVars:
-  EMBEDDING_MODEL: "BAAI/bge-base-en-v1.5"
-  QDRANT_COLLECTION: "discsync-embeddings-bge-base-en-v1_5"
+  EMBEDDING_MODEL: "text-embedding-qwen3-embedding-0.6b"
+  EMBEDDING_BASE_URL: "http://localai-local-ai.applications.svc.cluster.local:80/v1"
+  EMBEDDING_DIMENSIONS: "1024"
+  EMBEDDING_API_KEY: "n/a"
+  QDRANT_HOSTNAME: "http://qdrant.applications.svc.cluster.local"
+  QDRANT_PORT: "443"
+  QDRANT_COLLECTION: "discsync-embeddings"
 
 db:
   enabled: true
-  name: "discsync-embeddings"
+  name: "sbux-oracle"
   cluster: "grove-cluster"
 
   migrator:

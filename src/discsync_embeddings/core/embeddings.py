@@ -6,7 +6,7 @@ from datetime import datetime, UTC
 from typing import List, Any
 
 # external
-from sqlalchemy import select, case
+from sqlalchemy import select, case, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # project
@@ -19,7 +19,6 @@ from discsync_embeddings.core.message import (
 )
 from discsync_embeddings.helpers.logging import logger
 
-# Embedding settings
 EMBED_BATCH: int = int(os.environ.get("EMBED_BATCH", "100"))
 
 
@@ -145,18 +144,39 @@ async def embed_batch(qdrant: QdrantService, messages: List[Message]) -> int:
     messages_per_second = (len(built_embeddable_messages) / total_time) if total_time > 0 else 0.0
     logger.info(
         f"timing: count={len(built_embeddable_messages)} tokenize={time_tokenize_end:.3f}s "
-        f"embed={time_embed_end:.3f}s"
+        f"embed={time_embed_end:.3f}s "
         f"total={total_time:.3f}s mps={messages_per_second:.2f}"
     )
     return len(built_embeddable_messages)
 
 
+def _pending_count_stmt():
+    """Return a SQLAlchemy statement to count all pending messages for embedding."""
+
+    msg_tbl = Message.__table__
+    emb_tbl = MessageEmbedding.__table__
+    onclause: Any = emb_tbl.c.message_id == msg_tbl.c.id
+    return (
+        select(func.count())
+        .select_from(msg_tbl)
+        .outerjoin(emb_tbl, onclause)
+        .where((emb_tbl.c.message_id.is_(None)) | (emb_tbl.c.status.in_(["pending", "failed"])))
+    )
+
+
 async def process_pending_messages(qdrant: QdrantService, limit: int = 100) -> None:
     async with get_session() as session:
+        total_result = await session.execute(_pending_count_stmt())
+        total_remaining = total_result.scalar() or 0
+
         response = await session.execute(_pending_messages_stmt(limit))
         messages = list(response.scalars().all())
 
-        logger.debug(f"Fetched {len(messages)} pending messages")
+        if total_remaining > 0:
+            logger.info(f"Pending: {total_remaining} remaining, processing batch of {len(messages)}")
+        else:
+            logger.debug("No pending messages")
+            return
 
         try:
             await embed_batch(qdrant, messages)

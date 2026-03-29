@@ -19,7 +19,7 @@ from discsync_embeddings.core.sqlmodels import Message, User, Channel
 _author_name_cache: Dict[int, str] = {}
 _channel_name_cache: Dict[int, str] = {}
 
-# Normalization patterns
+# normalization patterns
 _RE_EMOJI_CUSTOM = re.compile(r"<a?:([A-Za-z0-9_~]+):\d+>")
 _RE_MENTION_USER = re.compile(r"<@!?(\d+)>")
 _RE_MENTION_ROLE = re.compile(r"<@&(\d+)>")

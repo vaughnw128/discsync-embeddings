@@ -101,7 +101,7 @@ spec:
               name: {{ .Values.db.cluster }}-app
               key: password
         - name: DATABASE_URL
-          value: "postgresql://$(DB_USERNAME):$(DB_PASSWORD)@$(DB_CLUSTER)-rw.{{ .Release.Namespace }}.svc.cluster.local:5432/$(DB_NAME)"
+          value: "postgresql+asyncpg://$(DB_USERNAME):$(DB_PASSWORD)@$(DB_CLUSTER)-rw.{{ .Release.Namespace }}.svc.cluster.local:5432/$(DB_NAME)"
         {{- end }}
         {{- end }}
         {{- if .Values.volumeMounts }}

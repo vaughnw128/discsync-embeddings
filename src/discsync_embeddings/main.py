@@ -19,10 +19,8 @@ from discsync_embeddings.core.embeddings import worker_loop
 async def lifespan(app: FastAPI):
     logger.info("Starting discsync-embeddings")
 
-    # Initialize SQLite schema in dev mode (no-op for PostgreSQL)
     await init_dev_sqlite_schema()
 
-    # Start background embeddings worker
     worker_task = asyncio.create_task(worker_loop())
 
     try:

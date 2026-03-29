@@ -89,27 +89,15 @@ class Message(SQLModel, table=True):
 class MessageEmbedding(SQLModel, table=True):
     __tablename__ = "message_embeddings"
 
-    # One-to-one with messages.id
     message_id: int = Field(primary_key=True, foreign_key="messages.id", sa_type=BigInteger())
-
-    # Processing metadata
     embedded_at: Optional[datetime] = Field(default=None, index=True)
     model_name: Optional[str] = Field(default=None)
     chunk_count: Optional[int] = Field(default=None)
-
-    # Store formatted chunk text used for embedding
     formatted_text: Optional[str] = Field(default=None, sa_type=Text())
-
-    # Destination info
     qdrant_collection: Optional[str] = Field(default=None)
-    # Store point ids as JSON array for portability
     qdrant_point_ids: Optional[List[str]] = Field(default=None, sa_column=Column(JSON()))
-
-    # Status tracking
     status: Optional[str] = Field(default=None, index=True)
     error: Optional[str] = Field(default=None)
-
-    # Optional hash of content to avoid re-embedding if unchanged
     content_sha256: Optional[str] = Field(default=None, index=True)
 
     __table_args__ = (
