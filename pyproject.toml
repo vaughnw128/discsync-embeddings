@@ -1,6 +1,6 @@
 [project]
 name = "discsync-embeddings"
-version = "1.2.3"
+version = "1.2.4"
 description = "Vectorize your favorite chats."
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
@@ -15,7 +15,7 @@ dependencies = [
     "emoji>=2.15.0",
     "langchain-openai>=1.0.2",
     "langchain-qdrant>=1.1.0",
-    "protobuf>=4.25.0,<6",
+    "protobuf>=7.34.1,<8",
     "grpcio>=1.60.0",
     "googleapis-common-protos>=1.63.0",
 ]
