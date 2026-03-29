@@ -1,4 +1,4 @@
-image: ghcr.io/vector3cyber/discsync-embeddings
+image: ghcr.io/vaughnw128/discsync-embeddings
 containerPort: 8080
 
 host: discsync-embeddings.internal.vw-ops.net
