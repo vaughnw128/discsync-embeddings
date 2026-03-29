@@ -21,8 +21,6 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "discsync-embeddings.name" . }}-eks-sa
-      automountServiceAccountToken: true
       {{- if .Values.db.enabled }}
       initContainers:
         - name: app-db-permissions
