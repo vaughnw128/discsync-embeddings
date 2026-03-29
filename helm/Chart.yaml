@@ -2,8 +2,8 @@ apiVersion: v2
 name: discsync-embeddings
 description: discsync-embeddings
 type: application
-version: 1.2.5
-appVersion: 1.2.5
+version: 1.2.6
+appVersion: 1.2.6
 dependencies:
   - name: single-container
     version: "1.x.x"
