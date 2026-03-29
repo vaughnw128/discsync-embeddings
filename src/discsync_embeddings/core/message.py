@@ -82,7 +82,7 @@ async def _replace_mentions(text: str) -> str:
         user_id_raw = match.group(1)
         try:
             user_id = int(user_id_raw)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return match.group(0)
 
         author_name = await get_author_name(user_id)
@@ -92,7 +92,7 @@ async def _replace_mentions(text: str) -> str:
         channel_id_raw = match.group(1)
         try:
             channel_id = int(channel_id_raw)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return match.group(0)
 
         channel_name = await get_channel_name(channel_id)
@@ -197,7 +197,7 @@ class EmbeddableMessage:
             ref_author_raw = m.message_reference.get("author", {}).get("id")
             try:
                 ref_author_id = int(ref_author_raw) if ref_author_raw is not None else None
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 ref_author_id = None
             if ref_author_id is not None:
                 original_author_name = await get_author_name(ref_author_id)
