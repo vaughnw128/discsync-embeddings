@@ -18,4 +18,6 @@ WORKDIR /app
 
 COPY --from=builder /app /app
 
-ENTRYPOINT ["/app/.venv/bin/uvicorn", "discsync_embeddings.main:app", "--host", "0.0.0.0", "--port", "8080"]
+ENV PATH="/app/.venv/bin:$PATH"
+
+ENTRYPOINT ["python", "-m", "uvicorn", "discsync_embeddings.main:app", "--host", "0.0.0.0", "--port", "8080"]
