@@ -6,6 +6,9 @@ on:
       - main
     types: [opened, edited, synchronize, reopened]
 
+permissions:
+  contents: read
+
 jobs:
   verify:
     uses: vaughnw128/hakoniwa/.github/workflows/verify-pr.yml@main
