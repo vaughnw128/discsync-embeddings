@@ -1,26 +1,23 @@
-# Builder
 FROM cgr.dev/chainguard/python:latest-dev AS builder
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
 
-RUN python -m venv /app/venv
-ENV PATH="/app/venv/bin:$PATH"
+ENV UV_PROJECT_ENVIRONMENT=/app/.venv
 
 COPY --chown=nonroot:nonroot pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-cache --no-dev --no-install-project
 
 COPY --chown=nonroot:nonroot . .
-RUN uv pip install --no-editable .
+RUN uv sync --frozen --no-cache --no-dev --no-editable
 
-# Runtime
-FROM cgr.dev/chainguard/python:latest-dev AS runtime
+FROM cgr.dev/chainguard/python:latest AS runtime
 
 WORKDIR /app
 
-COPY --from=builder /app /app
+COPY --from=builder /app/.venv /app/.venv
 
-ENV PATH="/app/venv/bin:$PATH"
+ENV PATH="/app/.venv/bin:$PATH"
 
 ENTRYPOINT ["python", "-m", "uvicorn", "discsync_embeddings.main:app", "--host", "0.0.0.0", "--port", "8080"]
