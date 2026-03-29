@@ -1,19 +1,16 @@
 single-container:
   name: "discsync-embeddings"
   image: "ghcr.io/vaughnw128/discsync-embeddings"
-  imageTag: "1.2.2"
+  imageTag: "1.2.4"
   containerPort: 8080
-
   gateway:
     type: gateway-api
     hostname: discsync-embeddings.internal.vw-ops.net
     clusterIssuer: cloudflare-issuer
-
   db:
     enabled: true
     secretName: "grove-cluster-app"
     uriKey: "uri"
-
   envVars:
     EMBEDDING_MODEL: "text-embedding-qwen3-embedding-0.6b"
     EMBEDDING_BASE_URL: "http://localai-local-ai.applications.svc.cluster.local:80/v1"
@@ -22,15 +19,12 @@ single-container:
     QDRANT_HOSTNAME: "http://qdrant.applications.svc.cluster.local"
     QDRANT_PORT: "6333"
     QDRANT_COLLECTION: "discsync-embeddings"
-
   livenessProbe:
     httpGet:
       path: /health
-
   readinessProbe:
     httpGet:
       path: /health
-
   resources:
     requests:
       memory: 1024Mi
