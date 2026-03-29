@@ -8,6 +8,8 @@ on:
   schedule:
     - cron: "0 * * * *"
   workflow_dispatch:
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: read
@@ -16,4 +18,7 @@ permissions:
 jobs:
   renovate:
     uses: vaughnw128/hakoniwa/.github/workflows/renovate.yml@main
+    with:
+      event-name: ${{ github.event_name }}
+      comment-body: ${{ github.event.comment.body || '' }}
     secrets: inherit
