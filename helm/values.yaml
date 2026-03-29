@@ -1,7 +1,7 @@
 single-container:
   name: "discsync-embeddings"
   image: "ghcr.io/vaughnw128/discsync-embeddings"
-  imageTag: "1.2.6"
+  imageTag: "1.2.7"
   containerPort: 8080
   gateway:
     type: gateway-api
