@@ -9,7 +9,7 @@ single-container:
     clusterIssuer: cloudflare-issuer
   db:
     enabled: true
-    secretName: "grove-cluster-app"
+    secretName: "sbux-oracle-pg-app"
     uriKey: "uri"
   envVars:
     EMBEDDING_MODEL: "text-embedding-qwen3-embedding-0.6b"
