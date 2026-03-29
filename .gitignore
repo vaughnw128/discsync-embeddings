@@ -152,6 +152,10 @@ ENV/
 env.bak/
 venv.bak/
 
+# helm
+helm/charts
+helm/Chart.lock
+
 # Spyder project settings
 .spyderproject
 .spyproject
