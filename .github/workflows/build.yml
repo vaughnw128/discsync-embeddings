@@ -19,7 +19,6 @@ jobs:
     uses: vaughnw128/hakoniwa/.github/workflows/build-and-release.yml@main
     with:
       platforms: linux/amd64,linux/arm64
-      checkov-soft-fail: true
     secrets: inherit
 
   bump:
