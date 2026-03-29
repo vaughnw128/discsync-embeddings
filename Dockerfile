@@ -5,10 +5,10 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
 
-COPY pyproject.toml uv.lock ./
+COPY --chown=nonroot:nonroot pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-cache --no-dev --no-install-project
 
-COPY . .
+COPY --chown=nonroot:nonroot . .
 RUN uv sync --frozen --no-cache --no-dev
 
 # Runtime

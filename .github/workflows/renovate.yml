@@ -1,0 +1,19 @@
+name: Renovate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .renovaterc.json5
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  renovate:
+    uses: vaughnw128/hakoniwa/.github/workflows/renovate.yml@main
+    secrets: inherit
