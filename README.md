@@ -26,7 +26,7 @@ The service embeds a single, human-readable line per message called
   - Custom emojis: `<:name:id>` → `[custom:name]`
   - Role mentions: `<@456>` → `@role`
   - Channel mentions: `<#789>` → `#channel`
-  - Whitespace collapsed to single spaces, CR/LF removed, non unicode characters removed
+  - Whitespace collapsed to single spaces, CR/LF removed, non Unicode characters removed
   - Emojis transformed into shortcodes, e.g. 😊 → `:smile:`
 - Optional markers appended as space-separated tokens:
   - `[replying to @<parent-author>]` when a reply reference is present
