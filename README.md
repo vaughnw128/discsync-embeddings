@@ -2,6 +2,7 @@
 
 Discord message embeddings to work with the [discsync](https://github.com/vaughnw128/discsync) message syncing service. Simplifies message
 objects into single lines, with repeatable and verifiable metadata to ensure correct syncing and idempotency.
+Not too fast, but gets the job done!
 
 ![logo](logo.png)
 
