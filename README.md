@@ -22,7 +22,7 @@ The service embeds a single, human-readable line per message called
 - Prefix: `@<author> in #<channel>:`
   - Author and channel names are resolved from the database by ID.
 - Body: normalized message content (single line)
-  - Mentions: `<@123>` → `@user` 
+  - Mentions: `<@123>` → `@user`
   - Custom emojis: `<:name:id>` → `[custom:name]`
   - Role mentions: `<@456>` → `@role`
   - Channel mentions: `<#789>` → `#channel`
@@ -70,4 +70,3 @@ uv run uvicorn discsync_embeddings.main:app --host 0.0.0.0 --port 8080 --reload
 export DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/dbname
 uv run uvicorn discsync_embeddings.main:app --host 0.0.0.0 --port 8080
 ```
-
