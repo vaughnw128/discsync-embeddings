@@ -1,22 +1,22 @@
 # built-in
 import asyncio
+from datetime import UTC, datetime
 import os
 import time
-from datetime import datetime, UTC
-from typing import List, Any
+from typing import Any
 
 # external
-from sqlalchemy import select, case, func
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # project
 from discsync_embeddings.core.db import get_session
-from discsync_embeddings.core.qdrant import get_qdrant, QdrantService
-from discsync_embeddings.core.sqlmodels import Message, MessageEmbedding
 from discsync_embeddings.core.message import (
-    message_fingerprint,
     EmbeddableMessage,
+    message_fingerprint,
 )
+from discsync_embeddings.core.qdrant import QdrantService, get_qdrant
+from discsync_embeddings.core.sqlmodels import Message, MessageEmbedding
 from discsync_embeddings.helpers.logging import logger
 
 EMBED_BATCH: int = int(os.environ.get("EMBED_BATCH", "100"))
@@ -58,7 +58,7 @@ async def update_embed_table(session: AsyncSession, msg_id: int) -> MessageEmbed
     return emb
 
 
-async def embed_batch(qdrant: QdrantService, messages: List[Message]) -> int:
+async def embed_batch(qdrant: QdrantService, messages: list[Message]) -> int:
     """Embed a batch of messages."""
 
     if not messages:
@@ -86,7 +86,7 @@ async def embed_batch(qdrant: QdrantService, messages: List[Message]) -> int:
 
     # Build TextNodes concurrently
     embeddable_messages = [EmbeddableMessage(m) for m in messages_to_embed]
-    built_embeddable_messages: List[EmbeddableMessage] = await asyncio.gather(
+    built_embeddable_messages: list[EmbeddableMessage] = await asyncio.gather(
         *(emb.build() for emb in embeddable_messages)
     )
 

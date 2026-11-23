@@ -70,3 +70,4 @@ uv run uvicorn discsync_embeddings.main:app --host 0.0.0.0 --port 8080 --reload
 export DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/dbname
 uv run uvicorn discsync_embeddings.main:app --host 0.0.0.0 --port 8080
 ```
+

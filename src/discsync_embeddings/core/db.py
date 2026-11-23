@@ -1,7 +1,7 @@
 # built-in
-import os
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Optional
+import os
 
 # external
 from sqlalchemy.ext.asyncio import (
@@ -14,8 +14,8 @@ from sqlalchemy.ext.asyncio import (
 # Import models for metadata
 from discsync_embeddings.core import sqlmodels as _models  # noqa: F401
 
-_engine: Optional[AsyncEngine] = None
-_Session: Optional[async_sessionmaker[AsyncSession]] = None
+_engine: AsyncEngine | None = None
+_Session: async_sessionmaker[AsyncSession] | None = None
 
 
 def _normalize_async_url(url: str) -> str:
@@ -30,14 +30,14 @@ def _normalize_async_url(url: str) -> str:
     return url
 
 
-def database_url() -> Optional[str]:
+def database_url() -> str | None:
     url = os.environ.get("DATABASE_URL", None)
     if url is not None:
         url = _normalize_async_url(url)
     return url
 
 
-def get_engine() -> Optional[AsyncEngine]:
+def get_engine() -> AsyncEngine | None:
     """Get or create the async database engine."""
 
     global _engine, _Session
@@ -57,7 +57,6 @@ def get_engine() -> Optional[AsyncEngine]:
 async def get_session() -> AsyncIterator[AsyncSession]:
     """Provide a transactional scope around a series of operations."""
 
-    global _Session
     if _Session is None:
         eng = get_engine()
         if eng is None:
