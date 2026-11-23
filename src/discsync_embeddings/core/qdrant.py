@@ -1,7 +1,6 @@
 # built-in
-import os
-from typing import List, Optional
 import asyncio
+import os
 
 # external
 from langchain_openai import OpenAIEmbeddings
@@ -22,9 +21,9 @@ EMBEDDING_API_KEY: str = os.environ.get("EMBEDDING_API_KEY", "n/a")
 
 # qdrant
 QDRANT_COLLECTION: str = os.environ.get("QDRANT_COLLECTION", "discsync-embeddings")
-QDRANT_HOSTNAME: Optional[str] = os.environ.get("QDRANT_HOSTNAME")
+QDRANT_HOSTNAME: str | None = os.environ.get("QDRANT_HOSTNAME")
 QDRANT_PORT: int = int(os.environ.get("QDRANT_PORT", "443"))
-QDRANT_API_KEY: Optional[str] = os.environ.get("QDRANT_API_KEY")
+QDRANT_API_KEY: str | None = os.environ.get("QDRANT_API_KEY")
 QDRANT_TIMEOUT: int = int(os.environ.get("QDRANT_TIMEOUT", "30"))
 
 
@@ -59,7 +58,7 @@ class QdrantService:
     model_name: str = EMBEDDING_MODEL
     collection: str = QDRANT_COLLECTION
 
-    async def setup(self) -> "QdrantService":
+    async def setup(self) -> QdrantService:
         logger.info(
             f"Setting up QdrantService: "
             f"embedding_url={EMBEDDING_BASE_URL} model={EMBEDDING_MODEL} "
@@ -100,12 +99,12 @@ class QdrantService:
 
         return self
 
-    async def embed_messages(self, messages: List[EmbeddableMessage]) -> List[str]:
+    async def embed_messages(self, messages: list[EmbeddableMessage]) -> list[str]:
         """Embed and store messages in Qdrant."""
 
-        texts: List[str] = []
-        metadatas: List[dict] = []
-        ids: List[str] = []
+        texts: list[str] = []
+        metadatas: list[dict] = []
+        ids: list[str] = []
 
         for message in messages:
             cleaned = message.cleaned_text if isinstance(message.cleaned_text, str) else ""
@@ -127,7 +126,7 @@ class QdrantService:
         return ids
 
 
-_service: Optional[QdrantService] = None
+_service: QdrantService | None = None
 
 
 async def get_qdrant() -> QdrantService:

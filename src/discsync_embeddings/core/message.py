@@ -1,23 +1,23 @@
 # built-in
 import asyncio
+from collections.abc import Buffer, Callable, Coroutine
+from dataclasses import dataclass
 import hashlib
 import json
 import re
 from re import Match, Pattern
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, cast, Callable, Coroutine
-from collections.abc import Buffer
-from uuid import uuid5, NAMESPACE_URL
+from typing import Any, cast
+from uuid import NAMESPACE_URL, uuid5
 
 # external
 import emoji
 
 # project
 from discsync_embeddings.core.db import get_session
-from discsync_embeddings.core.sqlmodels import Message, User, Channel
+from discsync_embeddings.core.sqlmodels import Channel, Message, User
 
-_author_name_cache: Dict[int, str] = {}
-_channel_name_cache: Dict[int, str] = {}
+_author_name_cache: dict[int, str] = {}
+_channel_name_cache: dict[int, str] = {}
 
 # normalization patterns
 _RE_EMOJI_CUSTOM = re.compile(r"<a?:([A-Za-z0-9_~]+):\d+>")
@@ -32,14 +32,14 @@ async def _async_re_sub(
     text: str,
 ) -> str:
     """Asynchronous version of re.sub where the replacement function is a coroutine."""
-    matches: List[Match[str]] = list(pattern.finditer(text))
+    matches: list[Match[str]] = list(pattern.finditer(text))
     if not matches:
         return text
 
     # Start all replacement coroutines concurrently.
     replacements = await asyncio.gather(*(repl_coro(m) for m in matches))
 
-    parts: List[str] = []
+    parts: list[str] = []
     last_end = 0
     for match, replacement in zip(matches, replacements):
         start, end = match.span()
@@ -141,7 +141,7 @@ def get_point_id(msg_id: int) -> str:
 def message_fingerprint(m: Message) -> str:
     """Compute a fingerprint for a message based on its content and metadata."""
 
-    blob: Dict[str, Any] = {
+    blob: dict[str, Any] = {
         "id": m.id,
         "content": m.content,
         "edited_at_ms": m.edited_at_ms,
@@ -156,7 +156,7 @@ def message_fingerprint(m: Message) -> str:
     return hashlib.sha256(buf).hexdigest()
 
 
-async def clean_message(content: Optional[str]) -> str:
+async def clean_message(content: str | None) -> str:
     """Clean message content for embedding."""
 
     if content is None:
@@ -174,9 +174,9 @@ class EmbeddableMessage:
     """Build an embeddable message from a Message object."""
 
     message: Message
-    cleaned_text: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
-    pid: Optional[str] = None
+    cleaned_text: str | None = None
+    metadata: dict[str, Any] | None = None
+    pid: str | None = None
 
     async def build_text(self) -> str:
         """Build message text"""
@@ -185,7 +185,7 @@ class EmbeddableMessage:
         channel_name = await get_channel_name(self.message.channel_id)
         author_name = await get_author_name(self.message.author_id)
         content = await clean_message(m.content)
-        parts: List[str] = [
+        parts: list[str] = [
             f"@{author_name} in #{channel_name}:",
             content,
         ]
@@ -208,13 +208,13 @@ class EmbeddableMessage:
 
         return " ".join(parts)  # Spaces work better!
 
-    async def get_metadata(self) -> Dict[str, Any]:
+    async def get_metadata(self) -> dict[str, Any]:
         m = self.message
 
         author_name = await get_author_name(self.message.author_id)
         channel_name = await get_channel_name(self.message.channel_id)
 
-        metadata: Dict[str, Any] = {
+        metadata: dict[str, Any] = {
             "message_id": m.id,
             "guild_id": m.guild_id,
             "channel_id": m.channel_id,
@@ -226,7 +226,7 @@ class EmbeddableMessage:
 
         return metadata
 
-    async def build(self) -> "EmbeddableMessage":
+    async def build(self) -> EmbeddableMessage:
         self.cleaned_text = await self.build_text()
         self.metadata = await self.get_metadata()
         self.pid = get_point_id(self.message.id)

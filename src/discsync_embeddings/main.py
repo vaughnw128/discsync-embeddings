@@ -1,17 +1,18 @@
 # built-in
+import asyncio
 from contextlib import asynccontextmanager
 from importlib.metadata import version
-import asyncio
 
 # external
 from fastapi import FastAPI
-from starlette.middleware import Middleware
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware import Middleware
+
+from discsync_embeddings.app.routers import build_api_router
+from discsync_embeddings.core.embeddings import worker_loop
 
 # project
 from discsync_embeddings.helpers.logging import logger
-from discsync_embeddings.app.routers import build_api_router
-from discsync_embeddings.core.embeddings import worker_loop
 
 
 @asynccontextmanager
